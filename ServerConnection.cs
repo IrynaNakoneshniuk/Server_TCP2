@@ -15,15 +15,13 @@ namespace Server_TCP2
         public static TcpListener server ;
         private static IPGlobalProperties ipProperties = IPGlobalProperties.GetIPGlobalProperties();
         private static TcpConnectionInformation[] tcpConnections =ipProperties.GetActiveTcpConnections();
-        public static async Task<string> ReadMsgAsync(TcpClient clt)
+        public static async Task<string[]> ReadMsgAsync(NetworkStream ns)
         {
-            using (NetworkStream ns = clt.GetStream())
-            {
-                using (StreamReader sr = new StreamReader(ns))
-                {
-                    return await sr.ReadToEndAsync();
-                }                
-            }
+            byte[] bufRead = new byte[1024];
+            string[] res = null;
+            await ns.ReadAsync(bufRead);
+            res = Encoding.Unicode.GetString(bufRead).Split(' ');
+            return res;
         }
        
         public static void StartServer()
@@ -33,49 +31,60 @@ namespace Server_TCP2
         }
         public static async Task WriteMsgAsync()
         {
+            string res = null;
             int countFraze = 0;
-            TcpClient clt = await server.AcceptTcpClientAsync();
-            string res = await ReadMsgAsync(clt);
             string[] arrRes = new string[2];
-            arrRes = res.Split(' ');
-            if (Authentification.Login.Select(i => i == arrRes[0]).First() != null &&
-                Authentification.Password.Select(i => i == arrRes[1]).First() != null)
+            TcpClient clt = await server.AcceptTcpClientAsync();
+            NetworkStream ns = clt.GetStream();
+            try
             {
-                using (NetworkStream ns = clt.GetStream())
+                arrRes = await ReadMsgAsync(ns);
+                
+                if (Authentification.Login.Select(i => i == arrRes[0])!=null
+                    && Authentification.Password.Select(i => i == arrRes[1])!=null)
                 {
-                    using (StreamWriter sr = new StreamWriter(ns))
+                    if (tcpConnections.Length < 20)
                     {
-                        if (tcpConnections.Length < 5)
+                        while (countFraze < 4)
                         {
-                            while (countFraze < 4)
-                            {
-                                await sr.WriteAsync(Fraze.FrazeArray[countFraze]);
-                                countFraze++;
-                            }
-                        }
-                        else
-                        {
-                            await sr.WriteAsync("Request is failed, overlimit of requests");
-                            clt.Close();
+                            byte[] buf = new byte[1024];
+                            buf = Encoding.Unicode.GetBytes(Fraze.FrazeArray[countFraze]);
+                            await ns.WriteAsync(buf);
+                            countFraze++;
                         }
                     }
+                    else
+                    {
+                        await ns.WriteAsync(Encoding.Unicode.GetBytes("Request is failed, overlimit of requests"));
+                        clt.Close();
+                    }
+                }
+                else
+                {
+                    await WriteErrAuthent(ns, clt);
                 }
             }
-            else
+            catch(Exception ex)
             {
-                await WriteErrAuthent(clt);
+                Console.WriteLine(ex.Message);
+            }
+            finally
+            {
+                ns.Close();
             }
         }
 
-        public static async Task WriteErrAuthent(TcpClient clt)
+        public static async Task WriteErrAuthent(NetworkStream ns, TcpClient clt)
         {
-            using (NetworkStream ns = clt.GetStream())
+            try
             {
-                using (StreamWriter sr = new StreamWriter(ns))
-                {
-                    await sr.WriteAsync("Request is failed, uncorrect password or login!");
-                    clt.Close();
-                }
+                byte[] bufWrite = Encoding.Unicode.GetBytes("Request is failed, uncorrect password or login!");
+                await ns.WriteAsync(bufWrite);
+                clt.Close();
+            }
+            catch(Exception ex)
+            {
+                Console.WriteLine(ex.Message);
             }
         }
         public static async Task GetLogsOfConnection()
